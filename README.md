@@ -9,6 +9,6 @@ A digital recreation of the traditional South Indian game *Pallanguzhi*, built u
 - Score tracking for both human and AI players.
 - Real-time updates for moves and transitions.
 
-- ## Sample Output
+## Sample Output
 
 ![Sample Gameplay Screenshot](output.png)
