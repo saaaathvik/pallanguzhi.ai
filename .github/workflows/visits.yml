@@ -22,13 +22,18 @@ jobs:
           PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
           TEAM_ID: ${{ vars.VERCEL_TEAM_ID }}
         run: |
-          since=$(( ($(date +%s) - 30 * 86400) * 1000 ))
-          args=(--data-urlencode "projectId=$PROJECT_ID" --data-urlencode "since=$since")
+          since=$(date -u -d '30 days ago' +%Y-%m-%dT%H:%M:%SZ)
+          until=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          args=(--data-urlencode "projectId=$PROJECT_ID" --data-urlencode "since=$since" --data-urlencode "until=$until")
           if [ -n "$TEAM_ID" ]; then args+=(--data-urlencode "teamId=$TEAM_ID"); fi
-          response=$(curl --fail --silent --show-error --get \
+          status=$(curl --silent --show-error --get --output response.json --write-out '%{http_code}' \
             "https://api.vercel.com/v1/query/web-analytics/visits/count" \
             -H "Authorization: Bearer $VERCEL_TOKEN" "${args[@]}")
-          views=$(echo "$response" | jq -er '.data.pageviews')
+          if [ "$status" != 200 ]; then
+            echo "::error::Vercel API returned $status: $(cat response.json)"
+            exit 1
+          fi
+          views=$(jq -er '.data.pageviews' response.json)
           echo "count=$views" >> "$GITHUB_OUTPUT"
 
       - name: Update badge
