@@ -1,16 +1,32 @@
 # Pallanguzhi.AI
 
-Play **Pallanguzhi**, the traditional South Indian mancala game, against an AI that uses minimax search with alpha-beta pruning.
+[![CI](https://github.com/saaaathvik/pallanguzhi.ai/actions/workflows/ci.yml/badge.svg)](https://github.com/saaaathvik/pallanguzhi.ai/actions/workflows/ci.yml)
+[![Page visits in the past 30 days](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/saaaathvik/pallanguzhi.ai/badges/visits.json)](https://pallanguzhi-ai.vercel.app/)
 
-Built with React, TypeScript and Vite. The AI runs entirely in the browser, in a Web Worker, so there is no backend.
+**Play it:** [pallanguzhi-ai.vercel.app](https://pallanguzhi-ai.vercel.app/)
+
+Pallanguzhi.AI is a South Indian mancala game with an AI twist! Play **Pallanguzhi**, a traditional two-player game of sowing and capturing shells, against an AI opponent that searches ahead using minimax with alpha-beta pruning. Everything runs in the browser, with no backend.
+
+![Gameplay](docs/gameplay.gif)
+
+## Tech stack
+
+| Area | Tools |
+|---|---|
+| Frontend | React 19, TypeScript, Vite |
+| AI | Minimax with alpha-beta pruning and lazy move generation, run in a Web Worker |
+| Quality | Vitest, ESLint, TypeScript strict mode |
+| CI/CD | GitHub Actions (lint, type-check, test, build on every push and pull request) |
+| Hosting | Vercel (static build, preview deployment for every pull request) |
 
 ## Features
 
-- Minimax AI with alpha-beta pruning, looking up to 5 moves ahead
-- Three difficulty levels: Easy (1 move, with occasional mistakes), Medium (3) and Hard (5)
-- Animated sowing and captures, with Slow, Normal, Fast or Off speeds, and a 1 second pause before the AI replies
+- AI opponent that looks up to 5 moves ahead
+- Three difficulty levels: Easy, Medium and Hard
+- Animated sowing and captures, with Slow, Normal, Fast or Off speeds
 - Undo (takes back your move and the AI's reply) and restart
 - In-game rules, shown on the first visit
+- Settings remembered between visits
 - Responsive layout and keyboard-accessible controls
 
 ## How to play
@@ -26,9 +42,17 @@ Capturing more than 42 shells wins immediately. Otherwise the game ends when the
 
 ## How the AI works
 
-`src/engine/ai.ts` implements minimax with alpha-beta pruning. The AI maximises *(AI captures − your captures)* and assumes you minimise it.
+The AI treats the game as a tree of positions. Each move leads to a new position, and the AI looks a fixed number of moves ahead (its **depth**) to pick the move that leaves it best off.
 
-Moves are generated **lazily**: a position is only simulated when the search reaches it, so branches that alpha-beta prunes are never built. The original version built the full game tree first and then searched it. Results from `npm run bench` over 200 random positions:
+![How the AI picks a move: you play a move, the page sends the board to a background thread, alpha-beta search runs to the chosen depth, the best move is sent back to the page, and after a 1 second pause the move is animated](docs/ai-flow.svg)
+
+**Scoring.** A position is scored as *AI captures minus your captures*. At the end of the game, the shells left on each side are added to that side's total.
+
+**Minimax.** The AI assumes both players play their best: on its turns it picks the move with the highest score, and on yours it assumes you pick the move with the lowest.
+
+**Alpha-beta pruning.** While searching, the AI keeps track of the best score each side is already guaranteed (alpha for the AI, beta for you). As soon as a move is shown to be worse than an option already found, the rest of that branch is skipped, because a sensible player would never choose it.
+
+**Lazy move generation.** Positions are simulated only when the search reaches them, so pruned branches are never built. Compared with building the full tree to the same depth first:
 
 | Depth | Full tree (avg positions) | Lazy search (avg positions) | Reduction |
 |---|---|---|---|
@@ -37,19 +61,22 @@ Moves are generated **lazily**: a position is only simulated when the search rea
 | 5 (Hard) | 2,686 | 560 | 79.2% |
 | 6 | 12,612 | 1,526 | 87.9% |
 
-Both approaches return the same move and score, which the tests check. At depth 5 every search took a few milliseconds.
+**Difficulty.** Easy searches 1 move ahead and plays a random move 30% of the time. Medium searches 3 moves ahead and Hard searches 5, both always playing their best move.
 
-### Running the AI in a Web Worker
+**Background thread.** The search runs in a Web Worker, so the page stays responsive while the AI thinks. The page sends the board to the worker as a message and receives the chosen move back.
 
-A Web Worker is a background thread the browser gives a page. The AI search runs there, so the page's main thread is free to keep animating and responding to input while the AI decides.
+### Latency
 
-1. **Start-up:** when the game mounts, `useGame` (`src/hooks/useGame.ts`) creates an `AiClient` (`src/engine/aiClient.ts`). The client starts the worker with `new Worker(new URL('./ai.worker.ts', import.meta.url), { type: 'module' })`, which Vite bundles as a separate script.
-2. **Request:** after your move, `useGame` calls `await ai.request(state, difficulty)`. The client gives the request an id, stores the Promise's `resolve` under that id, and sends `{ id, state, difficulty }` to the worker with `postMessage`. The browser copies the data to the worker thread.
-3. **Search:** in the worker (`src/engine/ai.worker.ts`), `onmessage` runs `chooseMove()`, which is the alpha-beta search in `ai.ts`, and posts back `{ id, move, score, nodes, ms }`.
-4. **Response:** the client's `onmessage` looks up the id and resolves the matching Promise, so the `await` in `useGame` continues with the AI's move. `useGame` also waits for a 1 second pause, then animates the move.
-5. **Stale answers:** if you undo or restart while the AI is searching, `useGame` sees that its run id has changed and ignores the answer.
-6. **Fallback:** if workers are unavailable or the worker fails, `AiClient` runs the same search on the main thread, so the game still works.
-7. **Clean-up:** when the game unmounts, `AiClient.dispose()` terminates the worker.
+Search time per move, over 200 random positions (`npm run bench`, Apple M2, Node 18):
+
+| Depth | Median | Slowest |
+|---|---|---|
+| 1 (Easy) | under 0.01 ms | 0.12 ms |
+| 3 (Medium) | 0.03 ms | 0.26 ms |
+| 5 (Hard) | 0.15 ms | 5.65 ms |
+| 6 | 0.43 ms | 11.49 ms |
+
+Every search finishes in well under 1 second. The AI then waits a deliberate 1 second before replying, so its move is easy to follow.
 
 ## Project structure
 
@@ -57,19 +84,15 @@ A Web Worker is a background thread the browser gives a page. The AI search runs
 src/
   engine/            Game rules and AI (pure TypeScript, no React)
     rules.ts         Board, sowing, captures, game end
-    ai.ts            Lazy minimax with alpha-beta pruning, difficulty levels
-    eager.ts         Full-tree reference search (tests and benchmark only)
+    ai.ts            Minimax with alpha-beta pruning, difficulty levels
     ai.worker.ts     Web Worker entry point
     aiClient.ts      Promise-based client for the worker
-    *.test.ts        Vitest tests
-  hooks/useGame.ts   Turn flow, animation, undo/restart
+  hooks/useGame.ts   Turn flow, animation, undo and restart
   components/        Board, shells, dialogs, rules
-scripts/
-  bench.ts           Lazy vs full-tree benchmark
-legacy/              Original Python/Pygame version
+scripts/bench.ts     Search benchmark
 ```
 
-## Development
+## Running locally
 
 Requires Node 18.18 or later.
 
@@ -83,17 +106,6 @@ npm run build      # production build in dist/
 npm run bench      # search benchmark
 ```
 
-## Testing
+## Authors
 
-- **Rules:** sowing, captures, turn order, game end, and a property test that all 84 shells are conserved over hundreds of random games.
-- **Search:** the lazy search matches the full-tree search on random positions at depths 1 to 5, and generates fewer positions at depth 6.
-
-GitHub Actions runs lint, type-check, tests and a production build on every push and pull request (`.github/workflows/ci.yml`).
-
-## Deployment
-
-The app is a static site. On Vercel, import the repository; it detects Vite and uses `npm run build` with the `dist` output directory. Every push to `main` deploys to production, and every pull request gets a preview URL.
-
-## Original version
-
-The first version of this project was a Python/Pygame desktop game. It lives in [`legacy/`](legacy/); run it from that folder with `python pallanguzhi.py` (requires `pygame`).
+Made by Saathvik Balaji and Shwetha Suresh Nathan.

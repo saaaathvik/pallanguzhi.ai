@@ -1,0 +1,47 @@
+name: Page views badge
+
+# Fetches the site's page views over the past 30 days from the Vercel Web Analytics API once a day and stores them
+# as a shields.io endpoint file on the `badges` branch, which the README badge reads.
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch page views
+        id: views
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+          TEAM_ID: ${{ vars.VERCEL_TEAM_ID }}
+        run: |
+          since=$(( ($(date +%s) - 30 * 86400) * 1000 ))
+          args=(--data-urlencode "projectId=$PROJECT_ID" --data-urlencode "since=$since")
+          if [ -n "$TEAM_ID" ]; then args+=(--data-urlencode "teamId=$TEAM_ID"); fi
+          response=$(curl --fail --silent --show-error --get \
+            "https://api.vercel.com/v1/query/web-analytics/visits/count" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" "${args[@]}")
+          views=$(echo "$response" | jq -er '.data.pageviews')
+          echo "count=$views" >> "$GITHUB_OUTPUT"
+
+      - name: Update badge
+        env:
+          VIEWS: ${{ steps.views.outputs.count }}
+        run: |
+          git init -q badges && cd badges
+          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          git fetch -q --depth 1 origin badges && git checkout -q badges || git checkout -q --orphan badges
+          jq -n --arg views "$(numfmt --grouping "$VIEWS")" \
+            '{schemaVersion: 1, label: "page visits (past 30 days)", message: $views, color: "e8a33d"}' > visits.json
+          git add visits.json
+          if git diff --cached --quiet; then echo "No change"; exit 0; fi
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "Update page views to $VIEWS"
+          git push -q origin badges
