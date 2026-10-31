@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Analytics } from '@vercel/analytics/react';
 import { Board } from './components/Board';
 import { Dialog } from './components/Dialog';
 import { Rules } from './components/Rules';
@@ -153,6 +154,8 @@ export default function App() {
           </button>
         </div>
       </Dialog>
+
+      <Analytics />
     </div>
   );
 }
